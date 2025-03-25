@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { LoginForm } from "./login-form";
+// import { LoginForm } from "./login-form";
+import LoginForm from "../components/login-page"
+
 
 const Login = () => {
   const { login } = useAuth();
