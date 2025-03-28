@@ -1,59 +1,137 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import axios from 'axios';
+import Cookies from 'js-cookie';
+import { useNavigate } from 'react-router-dom';
 
-const AuthContext = createContext<{
-  user: UserPros | null;
-  signup: (userData: UserPros) => Promise<void>;
-  login: (userData: UserPros) => Promise<{ user: UserPros | null; error: any }>;
-  logout: () => void;
-}>({
-  user: null,
-  signup: async () => {},
-  login: async () => ({ user: null, error: null }),
-  logout: () => {},
-});
-
-interface UserPros {
-  email: string,
-  password: string
+interface SignupResponse {
+  user: Object;
+  session: {
+    access_token: string;
+    refresh_token: string;
+  };
+  error?: {
+    message: string;
+  };
 }
 
-import { ReactNode } from "react";
+interface AuthCredentials {
+  email: string;
+  password: string;
+}
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<UserPros | null>(null);
+interface SignupCredentials extends AuthCredentials {
+  name: string;
+}
 
+interface AuthContextType {
+  user: any;
+  isAuthenticated: boolean;
+  loading: boolean;
+  login: (credentials: AuthCredentials) => Promise<any>;
+  signup: (credentials: SignupCredentials) => Promise<any>;
+  logout: () => {success: boolean};
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const HOST = import.meta.env.VITE_BACKEND_HOST;
+
+  // Check if user is already authenticated
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const checkAuth = async () => {
+      const token = Cookies.get('access_token');
+      if (token) {
+        try {
+          // You can add a check to your backend to validate the token
+          // const { data } = await axios.get(`${HOST}/auth/me`, {
+          //   headers: { Authorization: `Bearer ${token}` }
+          // });
+          // setUser(data.user);
+          setUser({});  // For now just set a placeholder
+        } catch (error) {
+          Cookies.remove('access_token');
+          Cookies.remove('refresh_token');
+        }
+      }
+      setLoading(false);
+    };
+
+    checkAuth();
   }, []);
 
-  const signup = async (userData: UserPros) => {
-    setUser(userData);
-    localStorage.setItem("user", JSON.stringify(userData));
-  };
-  const login = async (userData: UserPros) => {
+  const login = async (credentials: AuthCredentials) => {
     try {
-      setUser(userData);
-      localStorage.setItem("user", JSON.stringify(userData));
-      return { user: userData, error: null };  // Return the user object
-    } catch (error) {
-      return { user: null, error };  // Return the error if something goes wrong
+      const response = await axios.post<SignupResponse>(`${HOST}/auth/login`, credentials);
+      if (response.data.session) {
+        setUser({});  // Placeholder for user object
+        return response;
+      }
+      return { data: { error: { message: "Login failed" } } };
+    } catch (error: any) {
+      return { data: { error: { message: error.message || "Login failed" } } };
     }
   };
-  
+
+  const signup = async (credentials: SignupCredentials) => {
+    try {
+      const { data } = await axios.post<SignupResponse>(`${HOST}/auth/signup`, credentials);
+
+      if (data.error) {
+        return { data };
+      }
+
+      const res = await axios.post<SignupResponse>(`${HOST}/auth/login`, {
+        email: credentials.email,
+        password: credentials.password,
+      });
+
+      if (!res.data) {
+        return { data: { error: { message: "Signup error" } } };
+      }
+      
+      if (!res.data.session) {
+        return { data: { error: { message: "No session token found" } } };
+      }
+      
+      setUser({});  // Placeholder for user object
+      return res;
+    } catch (error: any) {
+      return { data: { error: { message: error.message || "Signup failed" } } };
+    }
+  };
 
   const logout = () => {
-    setUser(null);
-    localStorage.removeItem("user");
+    try {
+      Cookies.remove('access_token');
+      Cookies.remove('refresh_token');
+      setUser(null);
+      return { success: true }
+    } catch (error) {
+      return { success: false }
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, signup, login, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isAuthenticated: !!user, 
+      loading, 
+      login, 
+      signup,
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

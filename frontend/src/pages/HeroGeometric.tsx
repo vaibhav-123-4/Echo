@@ -1,6 +1,7 @@
 "use client"
 import { motion } from "framer-motion"
 import { useNavigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "../context/AuthContext";
 
 // Utility function to conditionally join class names
 const cn = (...classes: (string | boolean | undefined)[]) => {
@@ -96,6 +97,10 @@ export default function HeroGeometric({
   }
 
   const navigate = useNavigate();
+
+  const handleJoin = (e: React.MouseEvent<HTMLButtonElement>): void => {
+      navigate("/login");
+  }
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-[#030303]">
@@ -199,7 +204,7 @@ export default function HeroGeometric({
             className="flex justify-center"
           >
             <button
-              onClick={() => navigate("/login")}
+              onClick={handleJoin}
               className="px-8 py-3 rounded-full bg-gradient-to-r from-indigo-500 to-rose-500 text-white font-medium
                          hover:shadow-lg hover:shadow-indigo-500/20 hover:from-indigo-600 hover:to-rose-600
                          focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:ring-offset-2 focus:ring-offset-[#030303]

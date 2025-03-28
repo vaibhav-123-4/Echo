@@ -1,73 +1,77 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import SignUpPage from "../components/signup-page"
+import SignUpPage from "../components/signup-page";
+import { toast } from "react-toastify";
+import Cookies from "js-cookie";
 
 const Signup = () => {
   const { signup } = useAuth();
   const navigate = useNavigate();
+  const [name, setName] = useState("")
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  interface SignupResponse {
-    error?: {
-      message: string;
-    };
-  }
+  const [loading, setLoading] = useState(false);
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const response = (await signup({ email, password }).catch((err) => ({
-      error: { message: err.message || "An error occurred" },
-    }))) as SignupResponse;
+    setLoading(true);
     
-    if (response?.error) {
-      return alert(response.error.message);
+    try {
+      const response = await signup({
+        name,
+        email,
+        password,
+      });
+      
+      const { data } = response;
+      
+      if (data.error) {
+        throw new Error(data.error.message || "Signup failed");
+      }
+      
+      if (data.session) {
+        Cookies.set('access_token', data.session.access_token, { expires: 7 });
+        Cookies.set('refresh_token', data.session.refresh_token, { expires: 30 });
+        
+        toast.success("Sign up successful! Navigating to home page!", {
+          position: "top-right",
+          autoClose: 1000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+          theme: "light",
+        });
+        
+        setTimeout(() => navigate("/home"), 1000);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred during signup", {
+        position: "top-right",
+        autoClose: 1000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "light",
+      });
+    } finally {
+      setLoading(false);
     }
-  
-    alert("Sign up successful! Navigating to login page!");
-    navigate("/login");
   };
-
+  
   return (
     <SignUpPage
+      name={name}
+      setName={setName}
       email={email} 
       setEmail={setEmail}
       password={password}
       setPassword={setPassword}
       handleSignUp={handleSignup}
+      loading={loading}
     />
-    // <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 animate-pulse">
-    //   <div className="bg-white p-8 rounded-xl shadow-2xl transform hover:scale-105 transition duration-500">
-    //     <h2 className="text-3xl font-extrabold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-500">
-    //       Signup
-    //     </h2>
-    //     <form onSubmit={handleSignup} className="space-y-4">
-    //       <input 
-    //         type="email" 
-    //         placeholder="Email" 
-    //         value={email} 
-    //         onChange={(e) => setEmail(e.target.value)} 
-    //         required 
-    //         className="p-2 border rounded w-full focus:outline-none focus:ring-2 focus:ring-green-400"
-    //       />
-    //       <input 
-    //         type="password" 
-    //         placeholder="Password" 
-    //         value={password} 
-    //         onChange={(e) => setPassword(e.target.value)} 
-    //         required 
-    //         className="p-2 border rounded w-full focus:outline-none focus:ring-2 focus:ring-green-400"
-    //       />
-    //       <button 
-    //         type="submit" 
-    //         className="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300"
-    //       >
-    //         Signup
-    //       </button>
-    //     </form>
-    //   </div>
-    // </div>
   );
 };
 
