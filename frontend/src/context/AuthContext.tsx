@@ -39,22 +39,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
   const HOST = import.meta.env.VITE_BACKEND_HOST;
 
-  // Check if user is already authenticated
+  //Check if user is already authenticated
   useEffect(() => {
     const checkAuth = async () => {
       const token = Cookies.get('access_token');
       if (token) {
         try {
-          // You can add a check to your backend to validate the token
-          // const { data } = await axios.get(`${HOST}/auth/me`, {
-          //   headers: { Authorization: `Bearer ${token}` }
-          // });
-          // setUser(data.user);
-          setUser({});  // For now just set a placeholder
+          // Just consider the user authenticated if the token exists
+          // No backend validation needed
+          setUser({});  // Set a placeholder user object
         } catch (error) {
-          Cookies.remove('access_token');
-          Cookies.remove('refresh_token');
+          console.error("Error verifying authentication:", error);
+          setUser(null);
         }
+      } else {
+        setUser(null);
       }
       setLoading(false);
     };

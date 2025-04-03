@@ -10,6 +10,7 @@ interface PostCardProps {
   image?: string
   likes?: number
   comments?: number
+  isLiked?: boolean
   onLike?: () => void
   onComment?: () => void
 }
@@ -20,6 +21,7 @@ export default function PostCard({
   image,
   likes = 0,
   comments = 0,
+  isLiked = false,
   onLike,
   onComment,
 }: PostCardProps) {
@@ -46,9 +48,17 @@ export default function PostCard({
         <div className="flex items-center gap-4">
           <button
             onClick={onLike}
-            className="flex items-center gap-1.5 text-gray-300 hover:text-purple-400 transition-colors"
+            className={cn(
+              "flex items-center gap-1.5 text-gray-300 hover:text-purple-400 transition-colors",
+              isLiked && "text-purple-500"
+            )}
           >
-            <Heart className="h-4 w-4 transition-all duration-300 hover:fill-purple-500 hover:stroke-purple-500" />
+            <Heart 
+              className={cn(
+                "h-4 w-4 transition-all duration-300",
+                isLiked ? "fill-purple-500 stroke-purple-500" : "hover:fill-purple-500 hover:stroke-purple-500"
+              )} 
+            />
             <span className="text-xs">{likes}</span>
           </button>
 

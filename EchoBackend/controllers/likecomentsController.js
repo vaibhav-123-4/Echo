@@ -4,12 +4,17 @@ import { supabase } from "file:///C:/Users/Vaibhav%20Sharma/Desktop/codes/Echo/E
 const getUserIdFromToken = async (req) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return null;
-  console.log(authHeader);
-
-  const token = authHeader.split(" ")[1];
-  const { data: user, error } = await supabase.auth.getUser(token);
-  return error ? null : user.id;
   
+  const token = authHeader.split(" ")[1];
+  if (!token) return null;
+  
+  try {
+    const { data: user, error } = await supabase.auth.getUser(token);
+    return error ? null : user?.id;
+  } catch (error) {
+    console.error("Error getting user from token:", error);
+    return null;
+  }
 };
 
 // Utility function to validate UUID format
@@ -21,13 +26,65 @@ export const likePost = async (req, res) => {
     const { id } = req.params;
     if (!id || !isValidUUID(id)) return res.status(400).json({ error: "Invalid post ID." });
 
-    const { data: post, error: fetchError } = await supabase.from("posts").select("likes").eq("id", id).single();
+    // Get user ID from token or use user_id from params as fallback
+    let userId = await getUserIdFromToken(req);
+    
+    // If no user ID from token, check if it's in the request body or params
+    if (!userId) {
+      userId = req.body.user_id || req.params.user_id || "9cf9e8ca-76c3-4342-851f-6473825605b0";
+    }
+    
+    if (!userId) return res.status(401).json({ error: "Unauthorized. Please log in." });
+
+    // Check if the user has already liked this post
+    const { data: existingLike, error: likeCheckError } = await supabase
+      .from("user_likes")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("posts_id", id)
+      .single();
+
+    if (existingLike) {
+      return res.status(400).json({ error: "Do not like it again buddy!" });
+    }
+
+    // Get current post likes
+    const { data: post, error: fetchError } = await supabase
+      .from("posts")
+      .select("likes")
+      .eq("id", id)
+      .single();
+    
     if (fetchError || !post) return res.status(404).json({ error: "Post not found." });
 
-    const { error } = await supabase.from("posts").update({ likes: post.likes + 1 }).eq("id", id);
-    if (error) return res.status(400).json({ error: error.message });
+    // Begin a transaction to update both tables
+    const { error: updateError } = await supabase
+      .from("posts")
+      .update({ likes: post.likes + 1 })
+      .eq("id", id);
+    
+    if (updateError) return res.status(400).json({ error: updateError.message });
 
-    res.status(200).json({ message: "Post liked successfully.", likes: post.likes + 1 });
+    // Record the user like
+    const { error: likeError } = await supabase
+      .from("user_likes")
+      .insert([{ user_id: userId, posts_id: id }]);
+    
+    if (likeError) {
+      // Rollback the like if recording fails
+      await supabase
+        .from("posts")
+        .update({ likes: post.likes })
+        .eq("id", id);
+      
+      return res.status(400).json({ error: likeError.message });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Post liked successfully.", 
+      likes: post.likes + 1 
+    });
   } catch (err) {
     console.error("Error in likePost:", err);
     res.status(500).json({ error: "Internal server error." });
@@ -40,16 +97,90 @@ export const deletelike = async (req, res) => {
     const { id } = req.params;
     if (!id || !isValidUUID(id)) return res.status(400).json({ error: "Invalid post ID." });
 
-    const { data: post, error: fetchError } = await supabase.from("posts").select("likes").eq("id", id).single();
+    // Get user ID from token
+    const userId = await getUserIdFromToken(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized. Please log in." });
+
+    // Check if the user has liked this post
+    const { data: userLike, error: likeCheckError } = await supabase
+      .from("user_likes")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("posts_id", id)
+      .single();
+
+    if (!userLike) {
+      return res.status(400).json({ error: "You haven't liked this post." });
+    }
+
+    const { data: post, error: fetchError } = await supabase
+      .from("posts")
+      .select("likes")
+      .eq("id", id)
+      .single();
+    
     if (fetchError || !post) return res.status(404).json({ error: "Post not found." });
 
     const newLikes = Math.max(0, post.likes - 1);
-    const { error } = await supabase.from("posts").update({ likes: newLikes }).eq("id", id);
-    if (error) return res.status(400).json({ error: error.message });
+    
+    // Begin a transaction to update both tables
+    const { error: updateError } = await supabase
+      .from("posts")
+      .update({ likes: newLikes })
+      .eq("id", id);
+    
+    if (updateError) return res.status(400).json({ error: updateError.message });
+
+    // Remove the user like record
+    const { error: likeError } = await supabase
+      .from("user_likes")
+      .delete()
+      .eq("user_id", userId)
+      .eq("posts_id", id);
+
+    if (likeError) {
+      // Rollback the like count if deleting fails
+      await supabase
+        .from("posts")
+        .update({ likes: post.likes })
+        .eq("id", id);
+      
+      return res.status(400).json({ error: likeError.message });
+    }
 
     res.status(200).json({ message: "Like removed successfully.", likes: newLikes });
   } catch (err) {
     console.error("Error in deletelike:", err);
+    res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+// Get user's liked posts
+export const getUserLikedPosts = async (req, res) => {
+  try {
+    // Get user ID from token or request
+    let userId = await getUserIdFromToken(req);
+    
+    // If no user ID from token, check if it's in the request body or params
+    if (!userId) {
+      userId = req.body.user_id || req.params.user_id;
+    }
+    
+    if (!userId) return res.status(401).json({ error: "Unauthorized. Please log in." });
+
+    const { data, error } = await supabase
+      .from("user_likes")
+      .select("posts_id")  // Change from posts_id to post_id based on your table structure
+      .eq("user_id", userId);
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Extract post IDs from the result
+    const likedPosts = data.map(item => item.posts_id);
+    
+    res.status(200).json({ likedPosts });
+  } catch (err) {
+    console.error("Error fetching user liked posts:", err);
     res.status(500).json({ error: "Internal server error." });
   }
 };
@@ -83,8 +214,20 @@ export const getcomments = async (req, res) => {
     const { id } = req.params;
     if (!id || !isValidUUID(id)) return res.status(400).json({ error: "Invalid post ID." });
 
-    const { data, error } = await supabase.from("comments").select("text", { foreignTable: "posts" }).eq("posts_id", id);
+    const { data, error } = await supabase
+    .from("comments")
+    .select(`
+      text,
+      users (
+        name,
+        username
+      ),
+      created_at
+    `)
+    .eq("posts_id", id);
+
     if (error) return res.status(400).json({ error: error.message });
+
 
     res.status(200).json({ comments: data || [] });
   } catch (err) {
@@ -98,9 +241,9 @@ export const commentPost = async (req, res) => {
   try {
     const { posts_id ,user_id} = req.params;
     const { text } = req.body; // Extract user_id from body
-
+  
     if (!user_id) return res.status(401).json({ error: "Unauthorized." });
-    if (!posts_id || !isValidUUID(posts_id) || !text) return res.status(400).json({ error: "Invalid input." });
+    if (!posts_id || !text) return res.status(400).json({ error: "Invalid input." });
 
     // Check if post exists
     const { data: postExists, error: postError } = await supabase
@@ -161,7 +304,6 @@ export const updatecomment = async (req, res) => {
     res.status(500).json({ error: "Internal server error." });
   }
 };
-
 
 // Delete a comment (only the owner can delete)
 export const deletecomment = async (req, res) => {

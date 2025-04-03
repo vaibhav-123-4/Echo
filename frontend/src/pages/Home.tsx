@@ -8,6 +8,10 @@ import { BentoGrid } from "@/components/ui/bento-grid"
 import PostCard from "@/components/post-card"
 import Layout from "./layout"
 import CreatePostModal from "@/components/create-post-modal"
+import CommentModal from "@/components/comment-modal"
+import LogoutButton from "@/components/logout-button"
+import Cookies from "js-cookie"
+import { toast } from "react-toastify"
 
 interface Post {
   id: number;
@@ -22,8 +26,22 @@ interface LikedPosts {
   [key: number]: boolean;
 }
 
+interface Comment {
+  id: number;
+  user_id: string;
+  posts_id: number;
+  text: string;
+  created_at: string;
+  username?: string;
+  users?: {
+    username?: string;
+    name?: string;
+  };
+}
+
 export default function BentoGridDemo() {
-  const { logout } = useAuth();
+  const [user, setUser] = useState<any>(null);
+  const { user: authUser, isAuthenticated } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,78 +49,274 @@ export default function BentoGridDemo() {
   const [comments, setComments] = useState<Record<number, number>>({});
   const [likedPosts, setLikedPosts] = useState<LikedPosts>({});
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
+  const [currentPostId, setCurrentPostId] = useState<number | null>(null);
+  const [postComments, setPostComments] = useState<Comment[]>([]);
+  const [commentLoading, setCommentLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    axios.get("http://localhost:3000/posts")
-      .then(response => {
+    const fetchPosts = async () => {
+      try {
+        const response = await axios.get("http://localhost:3000/posts");
         console.log("Fetched posts:", response.data);
+
         const fetchedPosts: Post[] = Array.isArray(response.data.posts) ? response.data.posts : [];
         setPosts(fetchedPosts);
-        setLikes(fetchedPosts.reduce((acc, post) => ({ ...acc, [post.id]: post.likes }), {}));
+
+        setLikes(fetchedPosts.reduce((acc, post) => ({ ...acc, [post.id]: post.likes || 0 }), {}));
         setComments(fetchedPosts.reduce((acc, post) => ({ ...acc, [post.id]: Math.floor(Math.random() * 20) + 1 }), {}));
-      })
-      .catch(error => {
+      } catch (error) {
         console.error("Error fetching posts:", error);
         setError("Failed to load posts. Please try again.");
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPosts();
   }, []);
 
   const handleLike = async (postId: number): Promise<void> => {
-    if (likedPosts[postId]) return;
+    if (!isAuthenticated) {
+      toast.info("Please log in to like posts", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      navigate("/login");
+      return;
+    }
+
+    if (likedPosts[postId]) {
+      toast.info("You already liked this post", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      return;
+    }
 
     try {
-      const response = await axios.post<{ success: boolean }>(`http://localhost:3000/posts/likes/${postId}`);
-      if (response.status === 200 && response.data.success) {
-        setLikes((prev) => ({ ...prev, [postId]: prev[postId] + 1 }));
-        setLikedPosts({ ...likedPosts, [postId]: true });
+      const accessToken = Cookies.get('access_token');
+
+      if (!accessToken) {
+        toast.error("Authentication error. Please log in again.", {
+          position: "top-right",
+          autoClose: 3000,
+        });
+        navigate("/login");
+        return;
       }
-    } catch (error) {
+
+      const response = await axios.post<{ success: boolean; likes: number }>(
+        `http://localhost:3000/posts/likes/${postId}`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+
+      if (response.status === 200 && response.data.success) {
+        setLikes((prev) => ({ ...prev, [postId]: response.data.likes }));
+        setLikedPosts((prev) => ({ ...prev, [postId]: true }));
+
+        toast.success("Post liked!", {
+          position: "top-right",
+          autoClose: 1000,
+          hideProgressBar: true,
+        });
+      }
+    } catch (error: any) {
       console.error("Error liking the post:", error);
+      const errorMessage = error.response?.data?.error || "Failed to like the post. Please try again.";
+      toast.error(errorMessage, {
+        position: "top-right",
+        autoClose: 3000,
+      });
+    }
+  };
+
+  const fetchComments = async (postId: number) => {
+    setCommentLoading(true);
+    try {
+      const response = await axios.get(`http://localhost:3000/posts/comments/${postId}`);
+      // console.log("Fetched comments raw:", response.data);
+      
+      if (response.data && Array.isArray(response.data.comments)) {
+        // Add default username if missing
+        const commentsWithUsernames = response.data.comments.map((comment: Comment) => ({
+          ...comment,
+          username: comment.users?.username || "Anonymous User",
+          name: comment.users?.name || "Anonymous",
+          created_at: comment.created_at || new Date().toISOString()
+        }));
+        
+        setPostComments(commentsWithUsernames);
+        console.log("Fetched comments:", commentsWithUsernames);
+        setComments(prev => ({ ...prev, [postId]: commentsWithUsernames.length }));
+        console.log("Processed comments:", commentsWithUsernames);
+      } else {
+        setPostComments([]);
+      }
+          } catch (error) {
+      console.error("Error fetching comments:", error);
+      toast.error("Failed to load comments. Please try again.", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      setPostComments([]);
+    } finally {
+      setCommentLoading(false);
     }
   };
 
   const handleComment = (postId: number): void => {
-    setComments((prev) => ({ ...prev, [postId]: prev[postId] + 1 }));
+
+    if (!isAuthenticated) {
+      toast.info("Please log in to comment", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      navigate("/login");
+      return;
+    }
+
+    setCurrentPostId(postId);
+    fetchComments(postId);
+    setIsCommentModalOpen(true);
   };
 
-  const handleLogout = async () => {
-    setLoading(true);
-    try {
-      const { success } = logout();
-      if (!success) throw Error('Error while logging out');
-      localStorage.removeItem("user");
-      navigate("/login");
-    } catch (error) {
-      console.error("Error during logout:", error);
-      setError("Failed to logout. Please try again.");
-    } finally {
-      setLoading(false);
+  const handleAddComment = async (comment: string) => {
+    if (!currentPostId || !isAuthenticated) {
+            toast.error("You must be logged in to comment", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      return;
     }
+
+    try {
+      const accessToken = Cookies.get('access_token');
+
+      if (!accessToken) {
+        toast.error("Authentication error. Please log in again.", {
+          position: "top-right",
+          autoClose: 3000,
+        });
+        navigate("/login");
+        return;
+      }
+  
+      // Send the comment with the correct field name 'text'
+      const response = await axios.post(
+        `http://localhost:3000/posts/comments/${currentPostId}/e7188bc4-98b5-40c1-b07c-791e48836de5`,
+        { text: comment },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log("Comment response:", response.data);
+      if (response.status === 200 || response.status === 201) {
+        // Refresh comments after adding
+        fetchComments(currentPostId);
+        toast.success("Comment added successfully!", {
+          position: "top-right",
+          autoClose: 1000,
+        });
+      }
+     
+    } catch (error: any) {
+      console.error("Error adding comment:", error);
+      const errorMessage = error.response?.data?.error || "Failed to add comment. Please try again.";
+      toast.error(errorMessage, {
+        position: "top-right",
+        autoClose: 3000,
+      });
+    }
+  };
+
+  const closeCommentModal = () => {
+    setIsCommentModalOpen(false);
+    setCurrentPostId(null);
+    setPostComments([]);
   };
 
   const handleCreatePost = (caption: string, file: File | null) => {
-    if (caption && file) {
-      // In a real app, you would upload the file to a server
-      // For this demo, we'll just create a new post with the file URL
-      const newPost = {
-        id: posts.length + 1,
-        title: caption,
-        caption: caption,
-        image: URL.createObjectURL(file),
-        likes: 0
-      };
-
-      setPosts((prev) => [newPost, ...prev]);
-      setLikes((prev) => ({ ...prev, [newPost.id]: 0 }));
-      setComments((prev) => ({ ...prev, [newPost.id]: 0 }));
-      setIsCreateModalOpen(false);
+    if (!isAuthenticated || !authUser) {
+      toast.info("Please log in to create posts", {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      navigate("/login");
+      return;
     }
-  }
+
+    if (caption && file) {
+      const formData = new FormData();
+      formData.append("caption", caption);
+      formData.append("pic", file);
+
+      try {
+        const accessToken = Cookies.get('access_token');
+        if (!accessToken) {
+          toast.error("Authentication error. Please log in again.", {
+            position: "top-right",
+            autoClose: 3000,
+          });
+          navigate("/login");
+          return;
+        }
+
+        const user_id = authUser.id;
+        axios
+          .post(`http://localhost:3000/posts/new/${user_id}`, formData, {
+            headers: {
+              "Content-Type": "multipart/form-data",
+              "Authorization": `Bearer ${accessToken}`
+            },
+          })
+          .then((response) => {
+            if (response.data) {
+              const newPost = {
+                id: response.data.id || Date.now(),
+                caption: caption,
+                image: URL.createObjectURL(file),
+                likes: 0,
+              };
+              setPosts((prev) => [newPost, ...prev]);
+              setLikes((prev) => ({ ...prev, [newPost.id]: 0 }));
+              setComments((prev) => ({ ...prev, [newPost.id]: 0 }));
+              toast.success("Post created successfully!", {
+                position: "top-right",
+                autoClose: 1000,
+              });
+            }
+          })
+          .catch((error) => {
+            console.error("Error creating post:", error);
+            toast.error("Failed to create post. Please try again.", {
+              position: "top-right",
+              autoClose: 3000,
+            });
+          });
+      } catch (error) {
+        console.error("Error creating post:", error);
+        toast.error("Failed to create post. Please try again.", {
+          position: "top-right",
+          autoClose: 3000,
+        });
+      }
+    }
+    setIsCreateModalOpen(false);
+  };
 
   return (
-    <Layout onCreatePost={() => setIsCreateModalOpen(true)} onLogout={handleLogout}>
+    <Layout setUser={setUser}>
       <div className="dark min-h-screen bg-gray-950 py-10 px-4">
         {error && <div className="text-red-500 text-center mb-4">{error}</div>}
         {loading ? (
@@ -116,6 +330,7 @@ export default function BentoGridDemo() {
                 image={post.pic || post.image || "/placeholder.svg?height=300&width=500"}
                 likes={likes[post.id] || 0}
                 comments={comments[post.id] || 0}
+                isLiked={!!likedPosts[post.id]}
                 onLike={() => handleLike(post.id)}
                 onComment={() => handleComment(post.id)}
               />
@@ -124,7 +339,24 @@ export default function BentoGridDemo() {
         )}
       </div>
 
-      {isCreateModalOpen && <CreatePostModal onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreatePost} />}
+      {isCreateModalOpen && (
+        <CreatePostModal
+          onClose={() => setIsCreateModalOpen(false)}
+          onSubmit={handleCreatePost}
+        />
+      )}
+
+      {isCommentModalOpen && currentPostId && (
+        <>
+        <CommentModal
+          postId={currentPostId}
+          comments={postComments}
+          loading={commentLoading}
+          onClose={closeCommentModal}
+          onAddComment={handleAddComment}
+        />
+        </>
+      )}
     </Layout>
   )
 }

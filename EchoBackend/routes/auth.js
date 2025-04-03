@@ -15,6 +15,16 @@ router.post("/signup", async (req, res) => {
     },
   });
 
+  if(!error) {
+    const { error: insertError } = await supabase
+      .from("users")
+      .insert([{ id: data.user.id, name, email, username: name+"1234_" }]);
+
+    if (insertError) {
+      return res.status(400).json({ error: insertError.message });
+    }
+  }
+
   if (error) {
     return res.status(400).json({ error: error.message });
   }
