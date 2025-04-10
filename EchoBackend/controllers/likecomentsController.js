@@ -31,7 +31,7 @@ export const likePost = async (req, res) => {
     
     // If no user ID from token, check if it's in the request body or params
     if (!userId) {
-      userId = req.body.user_id || req.params.user_id || "9cf9e8ca-76c3-4342-851f-6473825605b0";
+      userId = req.params.user_id;
     }
     
     if (!userId) return res.status(401).json({ error: "Unauthorized. Please log in." });
@@ -196,12 +196,13 @@ export const getlikes = async (req, res) => {
 
     const { data, error } = await supabase
       .from("posts")
-      .select("*")
-      .eq("id", id);
+      .select("likes")
+      .eq("id", id)
+      .single();
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.status(200).json({ likes: data.length });
+    res.status(200).json({ likes: data?.likes || 0 });
   } catch (err) {
     console.error("Error fetching likes:", err);
     res.status(500).json({ error: "Internal server error." });
@@ -215,19 +216,19 @@ export const getcomments = async (req, res) => {
     if (!id || !isValidUUID(id)) return res.status(400).json({ error: "Invalid post ID." });
 
     const { data, error } = await supabase
-    .from("comments")
-    .select(`
-      text,
-      users (
-        name,
-        username
-      ),
-      created_at
-    `)
-    .eq("posts_id", id);
+      .from("comments")
+      .select(`
+        id,
+        text,
+        created_at,
+        users (
+          name,
+          username
+        )
+      `)
+      .eq("posts_id", id);
 
     if (error) return res.status(400).json({ error: error.message });
-
 
     res.status(200).json({ comments: data || [] });
   } catch (err) {

@@ -8,7 +8,7 @@ import { BentoGrid } from "@/components/ui/bento-grid"
 import PostCard from "@/components/post-card"
 import Layout from "./layout"
 import CreatePostModal from "@/components/create-post-modal"
-import CommentModal from "@/components/comment-modal"
+import CommentModal from "../components/comment-modal"
 import LogoutButton from "@/components/logout-button"
 import Cookies from "js-cookie"
 import { toast } from "react-toastify"
@@ -64,8 +64,22 @@ export default function BentoGridDemo() {
         const fetchedPosts: Post[] = Array.isArray(response.data.posts) ? response.data.posts : [];
         setPosts(fetchedPosts);
 
-        setLikes(fetchedPosts.reduce((acc, post) => ({ ...acc, [post.id]: post.likes || 0 }), {}));
-        setComments(fetchedPosts.reduce((acc, post) => ({ ...acc, [post.id]: Math.floor(Math.random() * 20) + 1 }), {}));
+        const likesData = await Promise.all(
+          fetchedPosts.map(async (post) => {
+            const likesResponse = await axios.get(`http://localhost:3000/posts/likes/${post.id}`);
+            return { [post.id]: likesResponse.data.likes };
+          })
+        );
+
+        const commentsData = await Promise.all(
+          fetchedPosts.map(async (post) => {
+            const commentsResponse = await axios.get(`http://localhost:3000/posts/comments/${post.id}`);
+            return { [post.id]: commentsResponse.data.comments.length };
+          })
+        );
+
+        setLikes(Object.assign({}, ...likesData));
+        setComments(Object.assign({}, ...commentsData));
       } catch (error) {
         console.error("Error fetching posts:", error);
         setError("Failed to load posts. Please try again.");
@@ -141,25 +155,19 @@ export default function BentoGridDemo() {
     setCommentLoading(true);
     try {
       const response = await axios.get(`http://localhost:3000/posts/comments/${postId}`);
-      // console.log("Fetched comments raw:", response.data);
-      
       if (response.data && Array.isArray(response.data.comments)) {
-        // Add default username if missing
         const commentsWithUsernames = response.data.comments.map((comment: Comment) => ({
           ...comment,
           username: comment.users?.username || "Anonymous User",
           name: comment.users?.name || "Anonymous",
-          created_at: comment.created_at || new Date().toISOString()
+          created_at: comment.created_at || new Date().toISOString(),
         }));
-        
         setPostComments(commentsWithUsernames);
-        console.log("Fetched comments:", commentsWithUsernames);
-        setComments(prev => ({ ...prev, [postId]: commentsWithUsernames.length }));
-        console.log("Processed comments:", commentsWithUsernames);
+        setComments((prev) => ({ ...prev, [postId]: commentsWithUsernames.length }));
       } else {
         setPostComments([]);
       }
-          } catch (error) {
+    } catch (error) {
       console.error("Error fetching comments:", error);
       toast.error("Failed to load comments. Please try again.", {
         position: "top-right",
@@ -172,6 +180,7 @@ export default function BentoGridDemo() {
   };
 
   const handleComment = (postId: number): void => {
+    console.log("Comment button clicked for post:", postId); // Add debug log
 
     if (!isAuthenticated) {
       toast.info("Please log in to comment", {
@@ -185,6 +194,7 @@ export default function BentoGridDemo() {
     setCurrentPostId(postId);
     fetchComments(postId);
     setIsCommentModalOpen(true);
+    console.log("Modal should be open:", postId, isCommentModalOpen); // Debug modal state
   };
 
   const handleAddComment = async (comment: string) => {
@@ -338,16 +348,7 @@ export default function BentoGridDemo() {
           </BentoGrid>
         )}
       </div>
-
-      {isCreateModalOpen && (
-        <CreatePostModal
-          onClose={() => setIsCreateModalOpen(false)}
-          onSubmit={handleCreatePost}
-        />
-      )}
-
-      {isCommentModalOpen && currentPostId && (
-        <>
+      {isCommentModalOpen && currentPostId !== null && (
         <CommentModal
           postId={currentPostId}
           comments={postComments}
@@ -355,8 +356,11 @@ export default function BentoGridDemo() {
           onClose={closeCommentModal}
           onAddComment={handleAddComment}
         />
-        </>
       )}
+      <footer className="text-center text-gray-500 mt-10">
+        <p>&copy; {new Date().getFullYear()} Echo. All rights reserved.</p>
+        <p>Made by Vaibhav</p>
+      </footer>
     </Layout>
   )
 }

@@ -63,7 +63,12 @@ export const BentoGridItem = ({
           </button>
 
           <button
-            onClick={onComment}
+            onClick={(e) => {
+              e.preventDefault(); // Add to prevent any default behavior
+              e.stopPropagation(); // Add to stop event propagation
+              onComment && onComment(); // Only call if onComment exists
+              console.log("Comment button clicked in BentoCard"); // Add debug log
+            }}
             className="flex items-center gap-1.5 text-gray-300 hover:text-purple-400 transition-colors"
           >
             <MessageCircle className="h-4 w-4 transition-all duration-300" />
